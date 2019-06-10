@@ -1,4 +1,3 @@
-import errno
 import socket
 from pathlib import Path
 import os
@@ -280,18 +279,32 @@ class Shell:
                 return False
         return True
 
+    """
+    This function run the shell program
+    """
     def runShell(self):
         shell_commands = {Shell.CP_NAME: Shell.cp, Shell.LS_NAME: Shell.ls,
                           Shell.PWD_NAME: Shell.pwd, Shell.CD_NAME: Shell.cd}
         while True:
+            # get input
             cmd = input(socket.gethostname() + ": " + self.currPath + "$ ")
+
+            # split the input into list of non empty strings:
             cmd_args = list(filter(None, cmd.split(" ")))
 
+            # check for invalid function name
             if cmd_args[0] not in shell_commands:
                 print(cmd_args[0] + Shell.INVALID_SHELL_USAGE)
                 continue
+
+            # run the current command
             shell_commands[cmd_args[0]](self, cmd_args[1:])
 
 
-shell = Shell()
-shell.runShell()
+def main():
+    shell = Shell()
+    shell.runShell()
+
+
+if __name__ == '__main__':
+    main()
