@@ -1,11 +1,10 @@
+import errno
 import socket
 from pathlib import Path
 import os
 import shutil
 
-EMPTY_STR = ""
-
-CD_TO_PARENT = ".."
+COPY_TO_FILE = ": can't copy into a file"
 
 """
 Class Shell, has two fields:
@@ -40,12 +39,16 @@ class Shell:
 
     # ========= Messages and symbols =========
     USAGE = "usage: "
-    INVALID_SHELL_USAGE = "Invalid Shell func: usage: cd[dir] | pwd | ls[" \
-                          "-at] | cp[-r]"
+    INVALID_SHELL_USAGE = ": command not found. usage: cd [dir] | pwd | ls " \
+                          "[-at] | cp [-r]"
     COMMAND_PREFIX = "-"
     HIDDEN_PREFIX = '.'
     WINDOWS_SEPARATOR = "\\"
     UNIX_SEPARATOR = "/"
+    EMPTY_STR = ""
+    CD_TO_PARENT = ".."
+    CP_MSG = "cp: "
+    NO_FILE_OR_DIR = ": No such file or directory"
 
     # ========= Member Fields =========
     currPath = str(Path.home())
@@ -66,27 +69,26 @@ class Shell:
        """
 
     def cd(self, arg=None):
-        # TODO check all possible outcomes
-
         # act like "cd " command, go home.
-        if arg is None or arg == [] or arg[0] == EMPTY_STR:
+        if arg is None or arg == [] or arg[0] == Shell.EMPTY_STR:
             self.currPath = self.homePath
             return
 
         addr = arg[0]
 
         # act like "cd .." command, go to parent.
-        if addr == CD_TO_PARENT:
+        if addr == Shell.CD_TO_PARENT:
             p = Path(self.currPath)
             self.currPath = str(p.parent)
             return
 
-        # get a normalized and absolute address
-        address_verify, new_address = self.parse_address(addr)
-        if address_verify:
-            self.currPath = new_address
+        # get a normalized and absolute path
+        path_verify, new_path = self.parse_and_verify_path(addr)
+        if path_verify:
+            self.currPath = new_path
         else:
-            if not os.path.exists(new_address):
+            # print the right message:
+            if not os.path.exists(new_path):
                 error = "No such file or directory"
             else:
                 error = "Not a directory"
@@ -109,16 +111,21 @@ class Shell:
 
     def ls(self, args):
         # Check all args:
-        # Convert arg string to array of chars:
-        args = "".join(args)
-
         # check if args is of the form "-XX"
-        if len(args) != 0 and args[0] != "-":
-            return
+        for arg in args:
+            if len(arg) != 0:
+                if arg[0] == "-":
+                    # check if all args after "-"  are valid
+                    if not self.check_args(arg[1:], Shell.LS_VALID,
+                                           Shell.LS_NAME):
+                        return
+                else:
+                    print(Shell.USAGE + Shell.LS_NAME + " [" +
+                          Shell.COMMAND_PREFIX + "".join(
+                        Shell.LS_VALID) + "]")
+                    return
 
-        # check if all args after "-"  are valid
-        if not self.check_args(args[1:], Shell.LS_VALID, Shell.LS_NAME):
-            return
+        args = set("".join([i.replace("-", "") for i in args]))
 
         # Get all files from directory
         files = self.get_files(args)
@@ -137,8 +144,6 @@ class Shell:
     """
 
     def cp(self, args):
-        args = "".join(args)
-
         # Check and assign args:
         if args[0] == Shell.COMMAND_PREFIX + Shell.RECURSIVE_COPY and len(
                 args) >= 3:
@@ -150,22 +155,26 @@ class Shell:
                   Shell.CP_VALID + "] source dest")
             return
 
-        if not self.check_args(args, Shell.CP_VALID, Shell.CP_NAME):
-            return
-
         # check source and dest
-        if not self.valid_src_and_dst(source, dest):
-            return
-
-        self.copy_files(dest, source, recursive_cpy)
+        valid, source, dest = self.valid_src_and_dst(source, dest)
+        if valid:
+            self.copy_files(source, dest, recursive_cpy)
 
     # =========  Auxiliary functions =========
 
     # ========= Functions for ls =========
+    """
+    This function prints all the files given
+    """
 
     def print_files(self, files):
         for file in files:
             print(file)
+
+    """
+    This function gets all the files from currPath.
+    if there is a "a" flag in args it will take the hidden files too.
+    """
 
     def get_files(self, args):
         if Shell.ALL_FILES in args:
@@ -177,6 +186,10 @@ class Shell:
             f.startswith(Shell.HIDDEN_PREFIX)]
         return files
 
+    """
+    This function orders the given files list by creation time and returns it.
+    """
+
     def order_by_creation_time(self, files):
         mtime = lambda f: os.stat(os.path.join(self.currPath, f)).st_mtime
         files = list(sorted(files, key=mtime))
@@ -184,50 +197,81 @@ class Shell:
 
     # ========= Functions for cp =========
 
-    def valid_src_and_dst(self, source, dest):
-        if not self.verify_address(source)[0]:
-            print("cp: " + source + ": No such file or directory")
-            return False
-        if not self.verify_address(dest)[0]:
-            print("cp: " + dest + ": No such file or directory")
-            return False
-        return True
+    """
+    This functions parses a new source and destination path and check if
+    they are existing directories. 
+    returns a tuple of: (Valid - Boolean, newSource - absolute path, 
+    newDest - absolute path) or False if either invalid.
+    """
 
-    def copy_files(self, dest, source, recursive_cpy):
-        if recursive_cpy:
-            # copy recursively
-            try:
-                shutil.copytree(source, dest)
-            # Directories are the same
-            except shutil.Error as e:
-                print('Directory not copied. Error: %s' % e)
-            # Any error saying that the directory doesn't exist
-            except OSError as e:
-                print('Directory not copied. Error: %s' % e)
+    def valid_src_and_dst(self, source, dest):
+
+        verify_src, new_src = self.parse_and_verify_path(source)
+        if not os.path.exists(new_src):
+            print(Shell.CP_MSG + source + Shell.NO_FILE_OR_DIR)
+            return False, None, None
+
+        verify_dest, new_dest = self.parse_and_verify_path(dest)
+        if not verify_dest:
+            print(Shell.CP_MSG + dest + Shell.NO_FILE_OR_DIR)
+            return False, None, None
+
+        if os.path.isfile(dest):
+            print(Shell.CP_MSG + dest + COPY_TO_FILE)
+            return False, None, None
+
+        return True, new_src, new_dest
+
+    """
+    This function copies all the files from source to dest, and if 
+    recursive_cpy is true it will copy recursively
+    """
+
+    def copy_files(self, source, dest, recursive_cpy):
+        if recursive_cpy and os.path.isdir(source):
+            self.copytree(source, dest)
         else:
             # copy regularly
+            if os.path.isdir(source):
+                print("cp: " + source + " is a directory (not copied).")
+                return
             shutil.copy(source, dest)
 
-    # ======== Functions for address parsing and argument validation ========
+    """
+    This is an external function that copies files from source to dest, 
+    i will use it in cp function
+    """
 
-    def parse_address(self, arg):
-        # normalize the address if needed
-        new_address = os.path.normpath(arg)
-        # add the address to current path
-        new_address = os.path.join(self.currPath, new_address)
-        return new_address
+    def copytree(self, src, dst, symlinks=False, ignore=None):
+        for item in os.listdir(src):
+            s = os.path.join(src, item)
+            d = os.path.join(dst, item)
+            if os.path.isdir(s):
+                shutil.copytree(s, d, symlinks, ignore)
+            else:
+                shutil.copy2(s, d)
+
+    # ======== Functions for path parsing and argument validation ========
+
     """
+    This functions parses a new absolute path and check if it is an 
+    existing directory. 
+    returns a tuple of: (Valid - Boolean, newPath - absolute path)
     """
-    def verify_address(self, path):
-        new_path = self.parse_address(path)
+
+    def parse_and_verify_path(self, path):
+        # normalize the path if needed
+        new_path = os.path.normpath(path)
+        # add the path to current path
+        new_path = os.path.join(self.currPath, new_path)
         return os.path.exists(new_path) and os.path.isdir(new_path), new_path
-
 
     """
     This function checks the if all of the given args are in the valid 
     args, else will print usade command with the calling_function as the 
     function name.
     """
+
     def check_args(self, args, valid, calling_function):
         for arg in args:
             if arg not in valid:
@@ -236,21 +280,18 @@ class Shell:
                 return False
         return True
 
+    def runShell(self):
+        shell_commands = {Shell.CP_NAME: Shell.cp, Shell.LS_NAME: Shell.ls,
+                          Shell.PWD_NAME: Shell.pwd, Shell.CD_NAME: Shell.cd}
+        while True:
+            cmd = input(socket.gethostname() + ": " + self.currPath + "$ ")
+            cmd_args = list(filter(None, cmd.split(" ")))
+
+            if cmd_args[0] not in shell_commands:
+                print(cmd_args[0] + Shell.INVALID_SHELL_USAGE)
+                continue
+            shell_commands[cmd_args[0]](self, cmd_args[1:])
 
 
-
-
-
-
-s = Shell()
-while (1):
-    shell_commands = {Shell.CP_NAME: Shell.cp, Shell.LS_NAME: Shell.ls,
-                      Shell.PWD_NAME:
-                          Shell.pwd, Shell.CD_NAME: Shell.cd}
-    cmd = input(socket.gethostname() + ": " + s.currPath + "$ ")
-    cmd_args = list(filter(None, cmd.split(" ")))
-
-    if cmd_args[0] not in shell_commands:
-        print(Shell.INVALID_SHELL_USAGE)
-        continue
-    shell_commands[cmd_args[0]](s, cmd_args[1:])
+shell = Shell()
+shell.runShell()
