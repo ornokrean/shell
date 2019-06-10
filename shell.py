@@ -1,6 +1,14 @@
 from pathlib import Path
 import os
 
+USAGE = "usage: "
+
+COMMAND_PREFIX = "-"
+
+LS_NAME = "ls"
+
+LS_VALID = "at"
+
 
 class Shell:
     currPath = str(Path.home())
@@ -11,17 +19,32 @@ class Shell:
 
     ###########################################################################
 
-    def cd(self):
-        # os.path.join(
-        pass
+    def cd(self, arg):
+        self.currPath = os.path.join(self.currPath, arg)
 
     def verifyAddress(self):
         f = Path(self.currPath)
         return f.exists()
-        #  check for abs or rel: if i have this sub path from this one ok.
+        #  check for abs or real: if i have this sub path from this one ok.
         # if i dont so i check from base. otherwise error.
 
+    def checkArgs(self, args, valid, command):
+        for arg in args:
+            if arg not in valid:
+                print(USAGE + command + " [" + COMMAND_PREFIX + "".join(
+                    valid) + "]")
+                return False
+        return True
+
+    def parseArgs(self, args):
+        if args[0] == COMMAND_PREFIX:
+            args = list(args[1:])
+        return args
+
     def ls(self, args):
+        args = self.parseArgs(args)
+        if not self.checkArgs(args, LS_VALID, LS_NAME):
+            return
         all_files = [f for f in os.listdir(self.currPath) if not
         f.startswith('.')]
         if "a" in args:
@@ -42,6 +65,5 @@ class Shell:
 
 
 s = Shell()
-
-s.pwd()
-s.ls(["a", "t"])
+# s.cd("Desktop/t")
+s.ls("qwerty")
